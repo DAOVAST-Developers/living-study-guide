@@ -1,0 +1,586 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta name="description" content="Living Study Guide: A private, human-in-the-loop study app turning notes into verified flashcards and quizzes. Zero backend, device-encrypted.">
+  <title>Living Study Guide — Private Human-in-the-Loop Study App</title>
+  <link rel="stylesheet" href="css/main.css">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+</head>
+<body>
+
+  <!-- =========================================================================
+       PRIVACY LOCK SCREEN (AES-GCM Web Crypto)
+       ========================================================================= -->
+  <div id="lock-screen-overlay" style="display: flex;">
+    <div class="lock-box">
+      <div class="lock-icon-badge">🔒</div>
+      <h1 class="lock-title" id="lock-screen-heading">Living Study Guide</h1>
+      <p class="lock-desc" id="lock-screen-subtext">
+        Enter your local passphrase to decrypt your private study guide and API keys.
+      </p>
+
+      <form id="lock-screen-form" onsubmit="return false;">
+        <div class="form-group" style="text-align: left;">
+          <label class="form-label" for="vault-passphrase-input">Local Vault Passphrase</label>
+          <input 
+            type="password" 
+            id="vault-passphrase-input" 
+            class="form-input" 
+            placeholder="Enter passphrase..." 
+            autocomplete="current-password"
+            required
+          >
+        </div>
+
+        <div class="form-group" id="passphrase-confirm-group" style="display: none; text-align: left;">
+          <label class="form-label" for="vault-passphrase-confirm">Confirm Passphrase</label>
+          <input 
+            type="password" 
+            id="vault-passphrase-confirm" 
+            class="form-input" 
+            placeholder="Confirm passphrase..." 
+            autocomplete="new-password"
+          >
+          <p class="form-hint">Choose a memorable passphrase. Data cannot be recovered if forgotten.</p>
+        </div>
+
+        <div style="display: flex; flex-direction: column; gap: 0.75rem; margin-top: 1.25rem;">
+          <button type="submit" class="btn btn-primary" id="btn-vault-unlock" style="width: 100%; padding: 0.75rem;">
+            Unlock Private Vault
+          </button>
+          <button type="button" class="btn btn-outline btn-sm" id="btn-load-demo-lock">
+            ⚡ Quick Start with Demo Data
+          </button>
+        </div>
+      </form>
+
+      <div class="notice-box" style="margin-top: 1.5rem; text-align: left; font-size: 0.775rem;">
+        <strong>Device-Only Security Note:</strong> All notes, flashcards, and API keys are encrypted locally inside this browser using PBKDF2 &amp; AES-GCM 256. This is client-side device encryption, not a server login.
+      </div>
+
+      <div style="margin-top: 0.75rem;">
+        <button type="button" class="btn btn-outline btn-sm" id="btn-emergency-reset" style="font-size: 0.72rem; color: var(--text-muted);">
+          Reset / Wipe Stored Vault
+        </button>
+      </div>
+    </div>
+  </div>
+
+  <!-- =========================================================================
+       MAIN APPLICATION SHELL
+       ========================================================================= -->
+  <div id="app-root">
+    <!-- Header -->
+    <header class="app-header">
+      <div class="header-container">
+        <a href="#dashboard" class="brand-wrapper" id="brand-link">
+          <div class="brand-icon">🧠</div>
+          <div>
+            <div class="brand-title">Living Study Guide</div>
+            <span class="brand-subtitle">Human-in-the-Loop Knowledge Base</span>
+          </div>
+        </a>
+
+        <!-- Navigation Tabs -->
+        <nav class="nav-tabs" aria-label="Main Navigation">
+          <button class="nav-tab-btn active" data-tab="dashboard" id="nav-btn-dashboard">
+            📊 Dashboard
+          </button>
+          <button class="nav-tab-btn" data-tab="sources" id="nav-btn-sources">
+            📄 Sources
+          </button>
+          <button class="nav-tab-btn" data-tab="queue" id="nav-btn-queue">
+            ⚖️ Review Queue <span class="badge-count" id="nav-queue-count">0</span>
+          </button>
+          <button class="nav-tab-btn" data-tab="library" id="nav-btn-library">
+            📚 Library <span class="badge-count" id="nav-library-count">0</span>
+          </button>
+          <button class="nav-tab-btn" data-tab="study" id="nav-btn-study">
+            ⚡ Study
+          </button>
+        </nav>
+
+        <!-- Header Actions -->
+        <div class="header-actions">
+          <button class="btn btn-secondary btn-sm" id="header-btn-demo" title="Reload Demo Notes and Sample Cards">
+            ⚡ Demo Notes
+          </button>
+          <button class="btn btn-secondary btn-sm" id="header-btn-settings" title="Settings & Gemini API Key">
+            ⚙️ Settings
+          </button>
+          <button class="btn btn-secondary btn-sm" id="header-btn-lock" title="Lock App Now">
+            🔒 Lock
+          </button>
+        </div>
+      </div>
+    </header>
+
+    <!-- Main Container -->
+    <main class="app-main">
+
+      <!-- =====================================================================
+           VIEW 1: DASHBOARD
+           ===================================================================== -->
+      <section id="view-dashboard" class="tab-panel active">
+        <div class="notice-box">
+          <strong>The Human-in-the-Loop Philosophy:</strong> AI never writes directly into your study library. Every generated card waits in the review queue tethered to its original verbatim sentence. Inspect, edit, or reject claims before memorizing them.
+        </div>
+
+        <div class="dashboard-grid">
+          <div class="metric-card">
+            <div class="metric-icon-box metric-icon-pending">⚖️</div>
+            <div>
+              <div class="metric-value" id="dash-pending-count">0</div>
+              <div class="metric-title">Awaiting Review</div>
+            </div>
+          </div>
+          <div class="metric-card">
+            <div class="metric-icon-box metric-icon-approved">📚</div>
+            <div>
+              <div class="metric-value" id="dash-approved-count">0</div>
+              <div class="metric-title">Approved Library</div>
+            </div>
+          </div>
+          <div class="metric-card">
+            <div class="metric-icon-box metric-icon-discarded">🗑️</div>
+            <div>
+              <div class="metric-value" id="dash-discarded-count">0</div>
+              <div class="metric-title">Discarded / Hallucinated</div>
+            </div>
+          </div>
+          <div class="metric-card">
+            <div class="metric-icon-box metric-icon-sources">📄</div>
+            <div>
+              <div class="metric-value" id="dash-sources-count">0</div>
+              <div class="metric-title">Source Documents</div>
+            </div>
+          </div>
+        </div>
+
+        <!-- Dashboard Content Grid -->
+        <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 1.5rem;" class="dash-content-grid">
+          <!-- Concepts Breakdown -->
+          <div class="card">
+            <h3 style="font-size: 1.1rem; margin-bottom: 1rem; display: flex; align-items: center; justify-content: space-between;">
+              <span>🗂️ Items by Concept</span>
+              <span style="font-size: 0.8rem; color: var(--text-muted);" id="dash-total-concepts">0 concepts</span>
+            </h3>
+            <div id="dash-concepts-list" style="display: flex; flex-direction: column; gap: 0.75rem;">
+              <p style="color: var(--text-muted); font-size: 0.85rem;">No concepts yet. Add sources or load demo data.</p>
+            </div>
+          </div>
+
+          <!-- Quiz Scores Over Time -->
+          <div class="card">
+            <h3 style="font-size: 1.1rem; margin-bottom: 1rem; display: flex; align-items: center; justify-content: space-between;">
+              <span>📈 Quiz Scores Over Time</span>
+              <span style="font-size: 0.8rem; color: var(--text-muted);" id="dash-quiz-attempts">0 sessions</span>
+            </h3>
+            <div id="dash-quiz-history-list" style="display: flex; flex-direction: column; gap: 0.75rem;">
+              <p style="color: var(--text-muted); font-size: 0.85rem;">No quiz sessions completed yet. Study your approved library to see retention trends.</p>
+            </div>
+          </div>
+        </div>
+
+        <!-- Quick Action Banner -->
+        <div style="margin-top: 1.5rem; display: flex; gap: 1rem; flex-wrap: wrap;">
+          <button class="btn btn-primary" id="dash-btn-goto-queue">
+            ⚖️ Review Pending Cards
+          </button>
+          <button class="btn btn-secondary" id="dash-btn-goto-sources">
+            📄 Add New Notes
+          </button>
+          <button class="btn btn-secondary" id="dash-btn-goto-study">
+            ⚡ Start Flashcard Session
+          </button>
+        </div>
+      </section>
+
+      <!-- =====================================================================
+           VIEW 2: SOURCES & NUMBERED SENTENCE INSPECTOR
+           ===================================================================== -->
+      <section id="view-sources" class="tab-panel">
+        <div style="display: grid; grid-template-columns: 1fr 1.2fr; gap: 1.5rem;" class="sources-split-grid">
+          <!-- Left: Add/Paste Source Form -->
+          <div class="card">
+            <h2 style="font-size: 1.2rem; margin-bottom: 0.5rem;">📄 Import Notes</h2>
+            <p style="color: var(--text-secondary); font-size: 0.85rem; margin-bottom: 1.25rem;">
+              Paste lecture notes, book excerpts, or upload a <code>.txt</code> or <code>.md</code> file. Notes are split into numbered sentences.
+            </p>
+
+            <form id="source-import-form" onsubmit="return false;">
+              <div class="form-group">
+                <label class="form-label" for="source-title-input">Source Title</label>
+                <input 
+                  type="text" 
+                  id="source-title-input" 
+                  class="form-input" 
+                  placeholder="e.g. Chapter 4: Computer Networking Fundamentals" 
+                  required
+                >
+              </div>
+
+              <div class="form-group">
+                <label class="form-label" for="source-file-upload">Or Upload File (.txt, .md)</label>
+                <input 
+                  type="file" 
+                  id="source-file-upload" 
+                  accept=".txt,.md" 
+                  class="form-input" 
+                  style="padding: 0.4rem;"
+                >
+              </div>
+
+              <div class="form-group">
+                <label class="form-label" for="source-text-input">Note Content</label>
+                <textarea 
+                  id="source-text-input" 
+                  class="form-textarea" 
+                  rows="10" 
+                  placeholder="Paste your source text here..." 
+                  required
+                ></textarea>
+              </div>
+
+              <div style="display: flex; gap: 0.75rem; flex-wrap: wrap;">
+                <button type="submit" class="btn btn-primary" id="btn-save-source">
+                  💾 Save &amp; Number Sentences
+                </button>
+                <button type="button" class="btn btn-success" id="btn-extract-gemini-trigger">
+                  ✨ Extract Cards with Gemini
+                </button>
+              </div>
+            </form>
+
+            <!-- Saved Sources List -->
+            <div style="margin-top: 2rem;">
+              <h3 style="font-size: 1rem; margin-bottom: 0.75rem; border-top: 1px solid var(--border-subtle); padding-top: 1rem;">
+                Saved Source Documents (<span id="saved-sources-count">0</span>)
+              </h3>
+              <div id="saved-sources-list" style="display: flex; flex-direction: column; gap: 0.5rem;">
+                <!-- Populated dynamically -->
+              </div>
+            </div>
+          </div>
+
+          <!-- Right: Numbered Sentence Inspector -->
+          <div class="card" id="sentence-inspector-card">
+            <div style="display: flex; align-items: center; justify-content: space-between; margin-bottom: 1rem;">
+              <h3 style="font-size: 1.1rem; display: flex; align-items: center; gap: 0.5rem;">
+                <span>🔍 Sentence Inspector:</span>
+                <span id="inspector-source-title" style="color: var(--accent-info); font-size: 0.95rem;">Select a source</span>
+              </h3>
+              <span class="badge badge-concept" id="inspector-sentence-count">0 sentences</span>
+            </div>
+
+            <div id="inspector-sentences-container" style="max-height: 600px; overflow-y: auto; line-height: 1.8; color: var(--text-secondary); font-size: 0.9rem;">
+              <p style="color: var(--text-muted); font-style: italic;">Select or import a note to view numbered sentence decomposition.</p>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <!-- =====================================================================
+           VIEW 3: REVIEW QUEUE (HUMAN-IN-THE-LOOP VERIFICATION GATEWAY)
+           ===================================================================== -->
+      <section id="view-queue" class="tab-panel">
+        <div class="notice-box" style="display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 0.75rem;">
+          <div>
+            <strong>Review Queue:</strong> Each pending item is displayed alongside its verbatim excerpt highlighted in the source note.
+          </div>
+          <div style="display: flex; gap: 0.5rem;">
+            <button class="btn btn-secondary btn-sm" id="btn-enter-merge-mode">
+              🔀 Merge Two Cards
+            </button>
+          </div>
+        </div>
+
+        <div class="review-layout">
+          <!-- Left Column: Source Note with Active Excerpt Highlight -->
+          <div class="source-inspector-pane">
+            <div class="source-inspector-title">
+              <span id="review-source-title">Source Note View</span>
+              <span class="badge badge-concept" id="review-source-badge">Context</span>
+            </div>
+            <div class="source-inspector-body" id="review-source-body">
+              Select any pending item on the right to inspect its exact sentence in context.
+            </div>
+          </div>
+
+          <!-- Right Column: Pending Cards List -->
+          <div class="review-items-list" id="review-items-container">
+            <!-- Dynamically populated review cards -->
+          </div>
+        </div>
+      </section>
+
+      <!-- =====================================================================
+           VIEW 4: LIBRARY (APPROVED ITEMS)
+           ===================================================================== -->
+      <section id="view-library" class="tab-panel">
+        <div class="library-controls-bar">
+          <div class="search-input-wrapper">
+            <span class="search-icon">🔍</span>
+            <input 
+              type="text" 
+              id="library-search-input" 
+              placeholder="Search library by concept, front, back, question, excerpt, or tag..."
+            >
+          </div>
+          <div style="display: flex; gap: 0.5rem;">
+            <button class="btn btn-primary btn-sm" id="lib-btn-study-flashcards">
+              ⚡ Flashcard Session
+            </button>
+            <button class="btn btn-secondary btn-sm" id="lib-btn-study-quiz">
+              📝 Take Quiz
+            </button>
+          </div>
+        </div>
+
+        <!-- Tag filter pills -->
+        <div class="tags-filter-bar" id="library-tags-bar">
+          <!-- Tag pills dynamically inserted -->
+        </div>
+
+        <!-- Grouped by Concept Cards Grid -->
+        <div id="library-groups-container">
+          <!-- Dynamically populated -->
+        </div>
+      </section>
+
+      <!-- =====================================================================
+           VIEW 5: STUDY MODE (FLASHCARDS & QUIZ)
+           ===================================================================== -->
+      <section id="view-study" class="tab-panel">
+        <div id="study-view-container">
+          <!-- Rendered dynamically by StudyController -->
+        </div>
+      </section>
+
+    </main>
+  </div>
+
+  <!-- =========================================================================
+       MODAL: SETTINGS & GEMINI API KEY
+       ========================================================================= -->
+  <div id="settings-modal" class="modal-overlay" style="display: none;">
+    <div class="modal-card">
+      <div class="modal-header">
+        <h2 class="modal-title">⚙️ Settings &amp; Security</h2>
+        <button class="close-btn" id="btn-close-settings">&times;</button>
+      </div>
+
+      <form id="settings-form" onsubmit="return false;">
+        <div class="form-group">
+          <label class="form-label" for="setting-gemini-key">Gemini API Key</label>
+          <div style="display: flex; gap: 0.5rem;">
+            <input 
+              type="password" 
+              id="setting-gemini-key" 
+              class="form-input" 
+              placeholder="Paste your Gemini API key (AIza...)" 
+              autocomplete="off"
+            >
+            <button type="button" class="btn btn-secondary btn-sm" id="btn-toggle-key-visibility">
+              👁️
+            </button>
+          </div>
+          <p class="form-hint">
+            Direct client-side call to Google Generative Language API. Never sent to any server. Encrypted at rest.
+          </p>
+        </div>
+
+        <div class="form-group">
+          <label class="form-label" for="setting-model-select">Gemini Model</label>
+          <select id="setting-model-select" class="form-select">
+            <option value="gemini-2.5-flash">Gemini 2.5 Flash (Recommended)</option>
+            <option value="gemini-1.5-flash">Gemini 1.5 Flash</option>
+            <option value="gemini-2.0-flash">Gemini 2.0 Flash</option>
+          </select>
+          <p class="form-hint">Default is Gemini 2.5 Flash for fast factual extraction.</p>
+        </div>
+
+        <button type="submit" class="btn btn-primary" id="btn-save-settings" style="width: 100%; margin-bottom: 1.5rem;">
+          Save Settings
+        </button>
+      </form>
+
+      <!-- Change Passphrase Section -->
+      <div style="border-top: 1px solid var(--border-subtle); padding-top: 1.25rem; margin-bottom: 1.5rem;">
+        <h3 style="font-size: 1rem; margin-bottom: 0.75rem;">🔑 Change Vault Passphrase</h3>
+        <div class="form-group">
+          <input 
+            type="password" 
+            id="setting-new-passphrase" 
+            class="form-input" 
+            placeholder="New passphrase..."
+          >
+        </div>
+        <button type="button" class="btn btn-secondary btn-sm" id="btn-update-passphrase">
+          Update Passphrase
+        </button>
+      </div>
+
+      <!-- Backup & Restore Section -->
+      <div style="border-top: 1px solid var(--border-subtle); padding-top: 1.25rem;">
+        <h3 style="font-size: 1rem; margin-bottom: 0.75rem;">💾 Backup &amp; Restore</h3>
+        <p style="font-size: 0.8rem; color: var(--text-secondary); margin-bottom: 1rem;">
+          Download an unencrypted JSON export containing your sources, items, and study logs, or restore from a previous backup file.
+        </p>
+
+        <div style="display: flex; gap: 0.75rem; flex-wrap: wrap;">
+          <button type="button" class="btn btn-secondary" id="btn-download-backup">
+            ⬇️ Download Backup (JSON)
+          </button>
+          <label class="btn btn-outline" style="cursor: pointer;">
+            ⬆️ Import Backup
+            <input type="file" id="backup-file-input" accept=".json" style="display: none;">
+          </label>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- =========================================================================
+       MODAL: EDIT STUDY ITEM
+       ========================================================================= -->
+  <div id="edit-item-modal" class="modal-overlay" style="display: none;">
+    <div class="modal-card">
+      <div class="modal-header">
+        <h2 class="modal-title" id="edit-modal-title">✏️ Edit Study Item</h2>
+        <button class="close-btn" id="btn-close-edit">&times;</button>
+      </div>
+
+      <form id="edit-item-form" onsubmit="return false;">
+        <input type="hidden" id="edit-item-id">
+
+        <div class="form-group">
+          <label class="form-label" for="edit-concept-input">Concept Name</label>
+          <input type="text" id="edit-concept-input" class="form-input" required>
+        </div>
+
+        <div class="form-group">
+          <label class="form-label" for="edit-type-select">Item Type</label>
+          <select id="edit-type-select" class="form-select">
+            <option value="flashcard">Flashcard (Front &amp; Back)</option>
+            <option value="quiz">Multiple-Choice Quiz Question</option>
+          </select>
+        </div>
+
+        <!-- Flashcard Fields -->
+        <div id="edit-flashcard-fields">
+          <div class="form-group">
+            <label class="form-label" for="edit-front-input">Front (Prompt)</label>
+            <textarea id="edit-front-input" class="form-textarea" rows="3"></textarea>
+          </div>
+          <div class="form-group">
+            <label class="form-label" for="edit-back-input">Back (Answer)</label>
+            <textarea id="edit-back-input" class="form-textarea" rows="4"></textarea>
+          </div>
+        </div>
+
+        <!-- Quiz Fields -->
+        <div id="edit-quiz-fields" style="display: none;">
+          <div class="form-group">
+            <label class="form-label" for="edit-question-input">Question</label>
+            <textarea id="edit-question-input" class="form-textarea" rows="2"></textarea>
+          </div>
+          <div class="form-group">
+            <label class="form-label">Options (4 choices)</label>
+            <input type="text" id="edit-option-0" class="form-input" style="margin-bottom: 0.35rem;" placeholder="Option A">
+            <input type="text" id="edit-option-1" class="form-input" style="margin-bottom: 0.35rem;" placeholder="Option B">
+            <input type="text" id="edit-option-2" class="form-input" style="margin-bottom: 0.35rem;" placeholder="Option C">
+            <input type="text" id="edit-option-3" class="form-input" style="margin-bottom: 0.35rem;" placeholder="Option D">
+          </div>
+          <div class="form-group">
+            <label class="form-label" for="edit-answer-input">Correct Answer (Must match one option exactly)</label>
+            <input type="text" id="edit-answer-input" class="form-input">
+          </div>
+          <div class="form-group">
+            <label class="form-label" for="edit-explanation-input">Explanation</label>
+            <textarea id="edit-explanation-input" class="form-textarea" rows="2"></textarea>
+          </div>
+        </div>
+
+        <div class="form-group">
+          <label class="form-label" for="edit-excerpt-input">Source Excerpt (Word-for-word from notes)</label>
+          <textarea id="edit-excerpt-input" class="form-textarea" rows="3" required></textarea>
+        </div>
+
+        <div class="form-group">
+          <label class="form-label" for="edit-tags-input">Tags (comma separated)</label>
+          <input type="text" id="edit-tags-input" class="form-input" placeholder="networking, protocols, dns">
+        </div>
+
+        <div style="display: flex; justify-content: flex-end; gap: 0.75rem;">
+          <button type="button" class="btn btn-secondary" id="btn-cancel-edit">Cancel</button>
+          <button type="submit" class="btn btn-primary" id="btn-save-edit">Save Changes</button>
+        </div>
+      </form>
+    </div>
+  </div>
+
+  <!-- =========================================================================
+       MODAL: MERGE TWO ITEMS
+       ========================================================================= -->
+  <div id="merge-modal" class="modal-overlay" style="display: none;">
+    <div class="modal-card">
+      <div class="modal-header">
+        <h2 class="modal-title">🔀 Merge Two Study Items</h2>
+        <button class="close-btn" id="btn-close-merge">&times;</button>
+      </div>
+
+      <p style="font-size: 0.85rem; color: var(--text-secondary); margin-bottom: 1.25rem;">
+        Synthesize two related pending items into a single comprehensive card.
+      </p>
+
+      <form id="merge-form" onsubmit="return false;">
+        <div class="form-group">
+          <label class="form-label" for="merge-item-1-select">First Item</label>
+          <select id="merge-item-1-select" class="form-select"></select>
+        </div>
+
+        <div class="form-group">
+          <label class="form-label" for="merge-item-2-select">Second Item</label>
+          <select id="merge-item-2-select" class="form-select"></select>
+        </div>
+
+        <div class="form-group">
+          <label class="form-label" for="merge-concept-input">Consolidated Concept</label>
+          <input type="text" id="merge-concept-input" class="form-input" required>
+        </div>
+
+        <div class="form-group">
+          <label class="form-label" for="merge-front-input">Merged Front / Prompt</label>
+          <textarea id="merge-front-input" class="form-textarea" rows="3" required></textarea>
+        </div>
+
+        <div class="form-group">
+          <label class="form-label" for="merge-back-input">Merged Back / Answer</label>
+          <textarea id="merge-back-input" class="form-textarea" rows="4" required></textarea>
+        </div>
+
+        <div class="form-group">
+          <label class="form-label" for="merge-excerpt-input">Combined Verbatim Excerpt</label>
+          <textarea id="merge-excerpt-input" class="form-textarea" rows="3" required></textarea>
+        </div>
+
+        <div style="display: flex; justify-content: flex-end; gap: 0.75rem;">
+          <button type="button" class="btn btn-secondary" id="btn-cancel-merge">Cancel</button>
+          <button type="submit" class="btn btn-primary" id="btn-submit-merge">Merge into Single Card</button>
+        </div>
+      </form>
+    </div>
+  </div>
+
+  <!-- Toast Notification Container -->
+  <div id="toast-container"></div>
+
+  <!-- Core App Logic (ES Modules) -->
+  <script type="module" src="js/app.js"></script>
+</body>
+</html>
